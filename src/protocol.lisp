@@ -37,7 +37,7 @@
 
 (defun %ensure-memory (&optional (memory *conversation-memory*))
   (%ensure memory :memory
-           "*conversation-memory* is nil — call MAKE-BUFFER-MEMORY or MAKE-WINDOW-MEMORY"))
+           "*conversation-memory* is nil — call MAKE-BUFFER-MEMORY, MAKE-WINDOW-MEMORY, MAKE-TOKEN-WINDOW-MEMORY, or MAKE-SUMMARY-MEMORY"))
 
 (defun window-turns (turns window-size)
   "Keep every :system turn plus the last WINDOW-SIZE non-system turns, original order.
