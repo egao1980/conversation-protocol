@@ -32,6 +32,26 @@
            #:make-window-memory
            #:window-memory-size
 
+           #:token-window-memory
+           #:make-token-window-memory
+           #:token-window-memory-max-tokens
+           #:token-window-memory-backend
+           #:token-window-memory-reserve
+           #:token-window-memory-model
+           #:use-token-window-memory
+
+           #:summary-memory
+           #:make-summary-memory
+           #:summary-memory-window-size
+           #:summary-memory-max-tokens
+           #:summary-memory-backend
+           #:summary-memory-reserve
+           #:summary-memory-model
+           #:summary-memory-prompt
+           #:use-summary-memory
+           #:summary-turn-p
+           #:+summary-prefix+
+
            #:memory-store
            #:memory-session
 
