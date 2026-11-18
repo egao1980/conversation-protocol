@@ -1,5 +1,5 @@
 (defsystem "conversation-protocol"
-  :version "0.2.0"
+  :version "0.3.0"
   :description "CLOS conversation memory protocol for cl-stack (session store + buffer/window/token-window)"
   :author "egao1980"
   :license "MIT"
@@ -15,7 +15,7 @@
   :in-order-to ((test-op (test-op "conversation-protocol/tests"))))
 
 (defsystem "conversation-protocol/summary"
-  :version "0.2.0"
+  :version "0.3.0"
   :description "LLM summary-memory for conversation-protocol (generate isolated from core)"
   :author "egao1980"
   :license "MIT"

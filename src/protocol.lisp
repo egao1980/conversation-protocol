@@ -74,6 +74,12 @@
 (defgeneric clear-memory (memory &key session)
   (:documentation "Drop SESSION (default MEMORY-SESSION). Missing session is ignored."))
 
+(defgeneric compact-turns (memory turns &key backend)
+  (:documentation "Force MEMORY to shrink TURNS now (the prompt overflowed or
+crossed a token threshold), whatever its usual limits say.
+→ (values new-turns compacted-p). BACKEND is a fallback for counting and
+summarizing when MEMORY has none. The default compacts nothing."))
+
 (defgeneric apply-memory-policy (memory turns)
   (:documentation "Trim or otherwise rewrite TURNS before save. Buffer = identity."))
 
@@ -112,6 +118,10 @@
 
 (defmethod recall ((memory null) incoming &key session)
   (recall (%ensure-memory) incoming :session session))
+
+(defmethod compact-turns ((memory conversation-memory) turns &key backend)
+  (declare (ignore backend))
+  (values (llm-protocol:coerce-turns turns) nil))
 
 (defmethod apply-memory-policy ((memory conversation-memory) turns)
   (declare (ignore memory))

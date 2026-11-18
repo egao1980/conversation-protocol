@@ -19,6 +19,7 @@
            #:recall
            #:remember
            #:clear-memory
+           #:compact-turns
 
            #:coerce-session
            #:window-turns
@@ -48,6 +49,10 @@
            #:summary-memory-reserve
            #:summary-memory-model
            #:summary-memory-prompt
+           #:summary-memory-tail-tokens
+           #:+compaction-prompt+
+           #:*summary-part-chars*
+           #:render-transcript
            #:use-summary-memory
            #:summary-turn-p
            #:+summary-prefix+
