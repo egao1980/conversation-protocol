@@ -55,7 +55,8 @@ sent for summarizing.")
              (or (llm-protocol:llm-tool-result-part-name part) "")
              (llm-protocol:llm-tool-result-part-error-p part)
              (%clip (llm-protocol:llm-tool-result-part-content part))))
-    (t (llm-protocol:part-text part))))
+    (llm-protocol:llm-text-part (llm-protocol:llm-text-part-text part))
+    (t nil)))
 
 (defun render-transcript (turns)
   "TURNS as plain text, one block per turn, for a summarizing GENERATE.
