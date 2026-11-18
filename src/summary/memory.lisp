@@ -7,6 +7,69 @@
   "Prefix of a :system summary turn. Documented choice: summaries are :system
    turns starting with this prefix, not a dedicated user/system role.")
 
+(defparameter +compaction-prompt+
+  "You are compacting a long agent conversation so the work can continue in a
+fresh context. The transcript follows. Write a summary under these markdown
+headings, keeping every fact needed to carry on:
+
+## Objective
+What the user ultimately wants.
+## Requirements
+Constraints, preferences and instructions the user gave, verbatim where exact.
+## Decisions
+What was decided and why; approaches ruled out.
+## Work State
+What is done, what is in progress, what failed (with exact error text).
+## Next Move
+The very next step.
+## Relevant Files
+Paths, symbols and identifiers touched or needed.
+## Important Context
+Anything else that would be costly to rediscover.
+
+If the transcript opens with an earlier summary, merge it in: keep what is
+still true, drop what was superseded. Reply with the summary only."
+  "Default SUMMARY-MEMORY prompt: a fixed template, so a compaction keeps the
+same facts every time instead of whatever a free-form summary picks.")
+
+(defvar *summary-part-chars* 2000
+  "Tool arguments and results longer than this are clipped in the transcript
+sent for summarizing.")
+
+(defun %clip (text)
+  (let ((text (or text "")))
+    (if (<= (length text) *summary-part-chars*)
+        text
+        (format nil "~a … [+~d chars]" (subseq text 0 *summary-part-chars*)
+                (- (length text) *summary-part-chars*)))))
+
+(defun %render-part (part)
+  (typecase part
+    (llm-protocol:llm-thinking-part nil)
+    (llm-protocol:llm-tool-call-part
+     (format nil "[tool call ~a ~a]"
+             (llm-protocol:llm-tool-call-part-name part)
+             (%clip (llm-protocol:llm-tool-call-part-arguments part))))
+    (llm-protocol:llm-tool-result-part
+     (format nil "[tool result ~a~:[~; (error)~]] ~a"
+             (or (llm-protocol:llm-tool-result-part-name part) "")
+             (llm-protocol:llm-tool-result-part-error-p part)
+             (%clip (llm-protocol:llm-tool-result-part-content part))))
+    (llm-protocol:llm-text-part (llm-protocol:llm-text-part-text part))
+    (t nil)))
+
+(defun render-transcript (turns)
+  "TURNS as plain text, one block per turn, for a summarizing GENERATE.
+Plain text cannot break provider rules (a tool call without its result)."
+  (with-output-to-string (s)
+    (dolist (turn (llm-protocol:coerce-turns turns))
+      (let ((texts (remove-if (lambda (x) (or (null x) (zerop (length x))))
+                              (mapcar #'%render-part (llm-protocol:llm-turn-parts turn)))))
+        (when texts
+          (format s "~&~:@(~a~):~%~{~a~^~%~}~%~%"
+                  (if (summary-turn-p turn) "earlier summary" (llm-protocol:llm-turn-role turn))
+                  texts))))))
+
 (defclass summary-memory (conversation-memory)
   ((window-size :initarg :window-size :accessor summary-memory-window-size
                 :initform 10)
@@ -15,8 +78,12 @@
    (backend :initarg :backend :accessor summary-memory-backend :initform nil)
    (reserve :initarg :reserve :accessor summary-memory-reserve :initform 0)
    (model :initarg :model :accessor summary-memory-model :initform nil)
+   (tail-tokens :initarg :tail-tokens :accessor summary-memory-tail-tokens
+                :initform 15000
+                :documentation "COMPACT-TURNS keeps the newest turns up to this many
+tokens verbatim (at least the last one) and summarizes the rest.")
    (prompt :initarg :prompt :accessor summary-memory-prompt
-           :initform "Summarize the following conversation turns concisely. Reply with the summary only."))
+           :initform +compaction-prompt+))
   (:documentation "When turn count or token budget is exceeded, compress the
    oldest span into one :system turn starting with +SUMMARY-PREFIX+.
    Previous summary turns are folded into the next compression."))
@@ -32,8 +99,9 @@
 
 (defun make-summary-memory (&key store (session "default")
                               (window-size 10) max-tokens backend
-                              (reserve 0) model prompt)
+                              (reserve 0) model prompt (tail-tokens 15000))
   (check-type window-size (or null (integer 0 *)))
+  (check-type tail-tokens (integer 0 *))
   (check-type max-tokens (or null (integer 0 *)))
   (check-type reserve (integer 0 *))
   (make-instance 'summary-memory
@@ -44,19 +112,21 @@
                  :backend backend
                  :reserve reserve
                  :model model
-                 :prompt (or prompt
-                             "Summarize the following conversation turns concisely. Reply with the summary only.")))
+                 :tail-tokens tail-tokens
+                 :prompt (or prompt +compaction-prompt+)))
 
 (defun use-summary-memory (&rest args &key &allow-other-keys)
   (setf *conversation-memory* (apply #'make-summary-memory args)))
 
-(defun %summary-count-backend (memory)
+(defun %summary-count-backend (memory &optional fallback)
   (or (summary-memory-backend memory)
+      fallback
       llm-protocol:*llm-backend*
       (make-instance 'llm-protocol:llm-backend)))
 
-(defun %summary-generate-backend (memory)
+(defun %summary-generate-backend (memory &optional fallback)
   (or (summary-memory-backend memory)
+      fallback
       llm-protocol:*llm-backend*
       (restart-case
           (error 'conversation-missing-backend
@@ -84,6 +154,14 @@
              (> (%count-tokens backend turns)
                 (max 0 (- budget (or (summary-memory-reserve memory) 0))))))))
 
+(defun %tool-safe-start (turns index)
+  "INDEX moved back past :tool turns, so a kept tail never opens with a tool
+result whose call was summarized away."
+  (loop while (and (plusp index)
+                   (eq :tool (llm-protocol:llm-turn-role (nth index turns))))
+        do (decf index))
+  index)
+
 (defun %window-keep (memory turns)
   "Real :system turns plus the last WINDOW-SIZE non-system turns, original order.
    Existing summary turns are excluded so they are re-compressed."
@@ -92,7 +170,8 @@
          (non-sys (remove-if-not #'%non-system-p turns)))
     (if (<= (length non-sys) window)
         (remove-if #'summary-turn-p turns)
-        (let ((keep-ns (nthcdr (- (length non-sys) window) non-sys)))
+        (let ((keep-ns (nthcdr (%tool-safe-start non-sys (- (length non-sys) window))
+                               non-sys)))
           (loop for tr in turns
                 when (or (%real-system-p tr)
                          (member tr keep-ns :test #'eq))
@@ -132,11 +211,10 @@
         (%trim-keep-to-tokens memory keep backend)
       (values (append overflow extra) trimmed))))
 
-(defun %make-summary-turn (memory overflow)
-  (let* ((backend (%summary-generate-backend memory))
-         (prompt (append (list (llm-protocol:system-turn
-                                (summary-memory-prompt memory)))
-                         overflow))
+(defun %make-summary-turn (memory overflow &optional fallback)
+  (let* ((backend (%summary-generate-backend memory fallback))
+         (prompt (list (llm-protocol:system-turn (summary-memory-prompt memory))
+                       (llm-protocol:user-turn (render-transcript overflow))))
          (response (llm-protocol:generate backend prompt
                                           :model (summary-memory-model memory)))
          (text (string-trim '(#\Space #\Newline #\Return #\Tab)
@@ -159,3 +237,30 @@
           (if (null overflow)
               turns
               (cons (%make-summary-turn memory overflow) keep))))))
+
+(defmethod compact-turns ((memory summary-memory) turns &key backend)
+  "Summarize all but the newest SUMMARY-MEMORY-TAIL-TOKENS of TURNS (real
+:system turns stay). Earlier summaries fold into the new one."
+  (let* ((turns (llm-protocol:coerce-turns turns))
+         (counter (%summary-count-backend memory backend))
+         (system (remove-if-not #'%real-system-p turns))
+         (rest (remove-if #'%real-system-p turns))
+         (budget (summary-memory-tail-tokens memory))
+         (start (length rest))
+         (used 0))
+    ;; Newest first: take turns while they fit; always keep the last one.
+    (loop for i from (1- (length rest)) downto 0
+          for cost = (%count-tokens counter (list (nth i rest)))
+          while (or (= i (1- (length rest)))
+                    (<= (+ used cost) budget))
+          do (incf used cost)
+             (setf start i))
+    (let* ((start (%tool-safe-start rest start))
+           (head (subseq rest 0 start))
+           (tail (nthcdr start rest)))
+      (if (notany #'%non-system-p head)
+          (values turns nil)
+          (values (append system
+                          (list (%make-summary-turn memory head backend))
+                          tail)
+                  t)))))

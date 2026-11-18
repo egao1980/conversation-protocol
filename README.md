@@ -44,6 +44,18 @@ Load `conversation-protocol/summary` (core does not call `generate`). When the n
                                      (stack-llm:assistant-turn "a1"))))
 ```
 
+### Compaction
+
+`(compact-turns memory turns &key backend)` → `(values new-turns compacted-p)` shrinks TURNS **now**, whatever the memory's usual limits say. An agent calls it when the prompt overflows the context window or crosses a token threshold. The base memory compacts nothing. `summary-memory`:
+
+- keeps real `:system` turns and the newest `:tail-tokens` (default 15000, at least the last turn) verbatim;
+- never opens the kept tail on a `:tool` result whose call would be summarized away (the window policy follows the same rule);
+- summarizes the rest, earlier `[summary]` turns included, from a plain-text `render-transcript` (tool arguments and results clipped to `*summary-part-chars*`). Plain text means no provider can reject a dangling tool call.
+
+The default prompt is `+compaction-prompt+`, a fixed template with the headings Objective / Requirements / Decisions / Work State / Next Move / Relevant Files / Important Context, so every compaction keeps the same kinds of facts. `:prompt` replaces it.
+
+This is agent-side compaction. Providers can also compact on their side (llm-protocol-anthropic `:server-compaction`).
+
 Wire an agent by hand:
 
 ```lisp

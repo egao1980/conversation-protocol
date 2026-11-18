@@ -130,3 +130,71 @@
           (list (llm-protocol:user-turn "u1")
                 (llm-protocol:user-turn "u2")))
          'conversation-protocol:conversation-missing-backend))))
+
+(defun %capturing-sum-backend (box)
+  (llm-protocol:make-mock-llm-backend
+   :handler (lambda (backend turns &key &allow-other-keys)
+              (declare (ignore backend))
+              (setf (car box) turns)
+              (llm-protocol:make-llm-response
+               :parts (list (llm-protocol:make-llm-text-part :text "SUM"))))))
+
+(deftest compact-turns-keeps-tail-and-tool-pairs
+  (let* ((box (list nil))
+         (mem (conversation-protocol:make-summary-memory
+               :backend (%capturing-sum-backend box) :tail-tokens 3))
+         (turns (list (llm-protocol:system-turn "sys")
+                      (llm-protocol:user-turn "old question")
+                      (llm-protocol:assistant-turn
+                       "" :tool-calls (list (llm-protocol:make-llm-tool-call-part
+                                             :id "t1" :name "grep" :arguments "{\"q\":1}")))
+                      (llm-protocol:tool-turn "t1" "MATCH" :name "grep")
+                      (llm-protocol:assistant-turn "done"))))
+    (multiple-value-bind (out did) (conversation-protocol:compact-turns mem turns)
+      (ok did)
+      (testing "system first, then the summary, then a tail that never opens on a tool result"
+        (ok (equal "sys" (%text (first out))))
+        (ok (conversation-protocol:summary-turn-p (second out)))
+        (ok (equal "[summary] SUM" (%text (second out))))
+        (ok (member (llm-protocol:llm-turn-role (third out)) '(:assistant :user)))
+        (ok (equal "done" (%text (car (last out))))))
+      (testing "the summarizer gets the template and a plain transcript"
+        (let ((sent (car box)))
+          (ok (= 2 (length sent)))
+          (ok (search "## Next Move" (%text (first sent))))
+          (ok (eq :user (llm-protocol:llm-turn-role (second sent))))
+          (ok (search "old question" (%text (second sent)))))))
+    (testing "nothing old enough to summarize"
+      (multiple-value-bind (out did)
+          (conversation-protocol:compact-turns
+           mem (list (llm-protocol:system-turn "sys") (llm-protocol:user-turn "hi")))
+        (ng did)
+        (ok (= 2 (length out)))))
+    (testing "the default memory compacts nothing"
+      (ng (nth-value 1 (conversation-protocol:compact-turns
+                        (conversation-protocol:make-buffer-memory)
+                        (list (llm-protocol:user-turn "a"))))))))
+
+(deftest render-transcript-clips-tool-results
+  (let* ((conversation-protocol:*summary-part-chars* 5)
+         (text (conversation-protocol:render-transcript
+                (list (llm-protocol:user-turn "hello")
+                      (llm-protocol:tool-turn "t1" "0123456789" :name "cat" :error-p t)))))
+    (ok (search "USER:" text))
+    (ok (search "[tool result cat (error)] 01234 … [+5 chars]" text))))
+
+(deftest summary-window-does-not-split-tool-pairs
+  (let ((mem (conversation-protocol:make-summary-memory
+              :window-size 1 :backend (%sum-backend))))
+    (conversation-protocol:remember
+     mem
+     (list (llm-protocol:user-turn "u1")
+           (llm-protocol:assistant-turn
+            "" :tool-calls (list (llm-protocol:make-llm-tool-call-part :id "t1" :name "x")))
+           (llm-protocol:tool-turn "t1" "R" :name "x")))
+    (let ((stored (conversation-protocol:load-session
+                   (conversation-protocol:memory-store mem)
+                   (conversation-protocol:memory-session mem))))
+      (ok (conversation-protocol:summary-turn-p (first stored)))
+      (ok (eq :assistant (llm-protocol:llm-turn-role (second stored))))
+      (ok (eq :tool (llm-protocol:llm-turn-role (third stored)))))))
