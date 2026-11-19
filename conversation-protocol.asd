@@ -1,5 +1,5 @@
 (defsystem "conversation-protocol"
-  :version "0.3.0"
+  :version "0.4.0"
   :description "CLOS conversation memory protocol for cl-stack (session store + buffer/window/token-window)"
   :author "egao1980"
   :license "MIT"
