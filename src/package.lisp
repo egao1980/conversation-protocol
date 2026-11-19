@@ -43,6 +43,14 @@
 
            #:summary-memory
            #:make-summary-memory
+           #:provider-compaction-memory
+           #:provider-compaction-memory-p
+           #:make-provider-compaction-memory
+           #:provider-compaction-backend
+           #:provider-compaction-model
+           #:provider-compaction-instructions
+           #:provider-compaction-tools
+           #:provider-compaction-fallback
            #:summary-memory-window-size
            #:summary-memory-max-tokens
            #:summary-memory-backend
