@@ -15,14 +15,15 @@
   :in-order-to ((test-op (test-op "conversation-protocol/tests"))))
 
 (defsystem "conversation-protocol/summary"
-  :version "0.3.0"
+  :version "0.4.0"
   :description "LLM summary-memory for conversation-protocol (generate isolated from core)"
   :author "egao1980"
   :license "MIT"
-  :depends-on ("conversation-protocol" "llm-protocol")
+  :depends-on ("conversation-protocol" (:version "llm-protocol" "0.5.0"))
   :serial t
   :pathname "src/summary"
-  :components ((:file "memory"))
+  :components ((:file "memory")
+               (:file "provider"))
   :in-order-to ((test-op (test-op "conversation-protocol/tests"))))
 
 (defsystem "conversation-protocol/tests"
@@ -32,7 +33,8 @@
   :components ((:file "package")
                (:file "protocol-test")
                (:file "memory-test")
-               (:file "restarts-test"))
+               (:file "restarts-test")
+               (:file "provider-test"))
   :perform (test-op (o c)
              (unless (symbol-call :rove :run c)
                (error "tests failed for ~A" (component-name c)))))

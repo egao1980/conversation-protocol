@@ -7,7 +7,7 @@ Lispy **CLOS** conversation memory for [cl-stack](https://github.com/egao1980/cl
 | System | Role | Repo |
 |--------|------|------|
 | `conversation-protocol` (`stack-conversation`) | Protocol + in-process store + buffer / window / token-window | this repo |
-| `conversation-protocol/summary` | `summary-memory` (calls `llm-protocol:generate`) | this repo |
+| `conversation-protocol/summary` | `summary-memory` (calls `llm-protocol:generate`), `provider-compaction-memory` (`llm-protocol:server-compact`) | this repo |
 
 ```lisp
 (asdf:load-system "conversation-protocol")
@@ -54,7 +54,9 @@ Load `conversation-protocol/summary` (core does not call `generate`). When the n
 
 The default prompt is `+compaction-prompt+`, a fixed template with the headings Objective / Requirements / Decisions / Work State / Next Move / Relevant Files / Important Context, so every compaction keeps the same kinds of facts. `:prompt` replaces it.
 
-This is agent-side compaction. Providers can also compact on their side (llm-protocol-anthropic `:server-compaction`).
+This is agent-side compaction. Providers can also compact on their side:
+
+`provider-compaction-memory` (`make-provider-compaction-memory :backend b :instructions s :tools ts :fallback mem`): `compact-turns` calls `llm-protocol:server-compact` (Anthropic compaction on demand). The result is the system turns plus the provider's summary part; other backends read it as text (`llm-protocol:portable-turns`). No summary from the provider → NIL, compact later. A backend without `:compaction` uses `:fallback` (e.g. a `summary-memory`) on the portable turns; with no fallback it signals `llm-unsupported` (`use-value` gives new turns). Threshold compaction stays the backend's option (llm-protocol-anthropic `:server-compaction`).
 
 Wire an agent by hand:
 
